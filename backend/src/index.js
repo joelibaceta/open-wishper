@@ -19,6 +19,11 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+// Ventana para considerar una apertura como "auto-vista" del propio remitente.
+// Si el remitente abre su correo (la extensión avisa con /self-view), las
+// aperturas dentro de ±esta ventana se marcan self:true y no cuentan.
+const SELF_VIEW_WINDOW_MS = 60000;
+
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
@@ -64,14 +69,20 @@ export default {
       const raw = await env.TRACKER.get(`msg:${id}`);
       if (raw) {
         const rec = JSON.parse(raw);
+        const at = Date.now();
+        // Si el remitente avisó que está viendo este correo hace poco, esta
+        // apertura es suya (auto-vista) y la marcamos self:true.
+        const self =
+          !!rec.selfViewAt && Math.abs(at - rec.selfViewAt) <= SELF_VIEW_WINDOW_MS;
         // Minimal: solo marca de tiempo y si vino del proxy de Gmail/Apple.
         // NO guardamos IP ni User-Agent (serían datos personales de terceros
         // que, además, suelen ser del proxy y no del destinatario real).
         rec.opens.push({
-          at: Date.now(),
+          at,
           viaProxy: /GoogleImageProxy|YahooMailProxy|Barracuda/i.test(
             request.headers.get('user-agent') || '',
           ),
+          self,
         });
         await env.TRACKER.put(`msg:${id}`, JSON.stringify(rec));
       }
@@ -87,6 +98,33 @@ export default {
       });
     }
 
+    // --- POST /self-view ---------------------------------------------------
+    // La extensión del remitente avisa que ESTE usuario está viendo el correo.
+    // Guardamos el timestamp y marcamos retroactivamente como self cualquier
+    // apertura reciente (por si el pixel se cargó justo antes del aviso).
+    if (pathname === '/self-view' && request.method === 'POST') {
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'invalid json' }, 400);
+      }
+      const { id } = body || {};
+      if (!id) return json({ error: 'id required' }, 400);
+
+      const raw = await env.TRACKER.get(`msg:${id}`);
+      if (!raw) return json({ ok: true, id, found: false });
+
+      const rec = JSON.parse(raw);
+      const now = Date.now();
+      rec.selfViewAt = now;
+      for (const o of rec.opens || []) {
+        if (Math.abs(now - o.at) <= SELF_VIEW_WINDOW_MS) o.self = true;
+      }
+      await env.TRACKER.put(`msg:${id}`, JSON.stringify(rec));
+      return json({ ok: true, id });
+    }
+
     // --- GET /status?ids=a,b,c --------------------------------------------
     if (pathname === '/status' && request.method === 'GET') {
       const ids = (url.searchParams.get('ids') || '')
@@ -100,14 +138,15 @@ export default {
           const raw = await env.TRACKER.get(`msg:${id}`);
           if (!raw) return;
           const rec = JSON.parse(raw);
-          // Ignoramos el primer hit si viene del proxy de Google al mismo
-          // segundo del envío (prefetch), para reducir falsos positivos.
-          const opens = rec.opens || [];
+          // Contamos solo aperturas reales del destinatario: excluimos las
+          // auto-vistas del propio remitente (self:true).
+          const real = (rec.opens || []).filter((o) => !o.self);
           out[id] = {
-            opened: opens.length > 0,
-            count: opens.length,
-            firstOpen: opens[0]?.at || null,
-            lastOpen: opens[opens.length - 1]?.at || null,
+            opened: real.length > 0,
+            count: real.length,
+            firstOpen: real[0]?.at || null,
+            lastOpen: real[real.length - 1]?.at || null,
+            selfCount: (rec.opens || []).length - real.length,
           };
         }),
       );

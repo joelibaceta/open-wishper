@@ -58,6 +58,23 @@ async function refreshStatus() {
   return messages;
 }
 
+// Avisa al backend que el propio remitente está viendo este correo, para que
+// no cuente esa carga del pixel como una apertura real del destinatario.
+async function selfView(id) {
+  if (!id) return { ok: false };
+  const base = await getBackendUrl();
+  try {
+    const res = await fetch(`${base}/self-view`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    return { ok: res.ok };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
 chrome.runtime.onMessage.addListener((req, _sender, sendResponse) => {
   (async () => {
     switch (req?.type) {
@@ -69,6 +86,9 @@ chrome.runtime.onMessage.addListener((req, _sender, sendResponse) => {
         break;
       case 'getBackendUrl':
         sendResponse({ url: await getBackendUrl() });
+        break;
+      case 'selfView':
+        sendResponse(await selfView(req.payload?.id));
         break;
       default:
         sendResponse({ error: 'unknown message type' });

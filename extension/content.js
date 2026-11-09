@@ -218,6 +218,33 @@
         threadSubj.parentElement.appendChild(b);
       }
     }
+
+    // Si estamos viendo un correo con nuestro pixel, avisar que es auto-vista.
+    detectSelfView();
+  }
+
+  // --- supresión de auto-aperturas ---------------------------------------
+  // Cuando el propio remitente abre un correo con nuestro pixel, Gmail carga
+  // la imagen y el backend lo contaría como "apertura". Para evitar ese falso
+  // positivo, detectamos el id del pixel presente en el hilo abierto (va en el
+  // src, aunque Gmail lo proxee: ...#https://px.groway.studio/px/{id}.gif) y
+  // avisamos al backend para que ignore esa carga.
+  const selfViewPinged = new Map(); // id -> último ping (ms)
+  const SELF_VIEW_REPING_MS = 25000;
+
+  function detectSelfView() {
+    const now = Date.now();
+    const ids = new Set();
+    document.querySelectorAll('img[src*="/px/"]').forEach((img) => {
+      const m = img.src.match(/\/px\/([0-9a-fA-F-]{8,})\.gif/);
+      if (m) ids.add(m[1]);
+    });
+    for (const id of ids) {
+      const last = selfViewPinged.get(id) || 0;
+      if (now - last < SELF_VIEW_REPING_MS) continue;
+      selfViewPinged.set(id, now);
+      sendToBackground('selfView', { id });
+    }
   }
 
   // Re-render cuando cambia el DOM de Gmail (navegación entre vistas).
