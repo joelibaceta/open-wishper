@@ -2,7 +2,16 @@ const $ = (id) => document.getElementById(id);
 
 async function load() {
   const { backendUrl } = await chrome.storage.local.get('backendUrl');
-  if (backendUrl) $('backend').value = backendUrl;
+  if (backendUrl) {
+    $('backend').value = backendUrl;
+  } else {
+    // Mostrar la URL efectiva (el default de defaults.js) en vez de dejar el
+    // campo vacío con un placeholder confuso.
+    const r = await new Promise((res) =>
+      chrome.runtime.sendMessage({ type: 'getBackendUrl' }, res),
+    );
+    if (r?.url) $('backend').value = r.url;
+  }
   await render();
 }
 

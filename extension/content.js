@@ -22,9 +22,32 @@
       .trim()
       .toLowerCase();
 
+  // Cuando se recarga/actualiza la extensión, el content script que ya estaba
+  // en la página queda "huérfano" (chrome.runtime.id pasa a undefined y
+  // sendMessage lanza "Extension context invalidated"). Lo detectamos para
+  // dejar de reintentar en silencio y avisar que hay que recargar Gmail.
+  let contextValid = true;
+  let pollTimer = null;
   function sendToBackground(type, payload) {
     return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type, payload }, (res) => resolve(res));
+      if (!contextValid || !chrome.runtime?.id) {
+        resolve(null);
+        return;
+      }
+      try {
+        chrome.runtime.sendMessage({ type, payload }, (res) => {
+          if (chrome.runtime.lastError) {
+            resolve(null);
+            return;
+          }
+          resolve(res);
+        });
+      } catch (e) {
+        contextValid = false;
+        if (pollTimer) clearInterval(pollTimer);
+        log('extensión actualizada — recarga la pestaña de Gmail para reactivar el tracking.');
+        resolve(null);
+      }
     });
   }
 
@@ -210,6 +233,6 @@
     if (r?.url) backendUrl = r.url;
     log('activo. backend:', backendUrl);
     refreshAndRender();
-    setInterval(refreshAndRender, CFG.POLL_INTERVAL_MS);
+    pollTimer = setInterval(refreshAndRender, CFG.POLL_INTERVAL_MS);
   })();
 })();
