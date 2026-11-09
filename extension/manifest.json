@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Pixel Tracker for Gmail",
+  "version": "0.1.0",
+  "description": "Inserta un tracking pixel en los correos de Gmail y muestra cuándo fueron abiertos.",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": [
+    "https://mail.google.com/*",
+    "https://px.groway.studio/*",
+    "https://*.workers.dev/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://mail.google.com/*"],
+      "js": ["defaults.js", "content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Pixel Tracker"
+  }
+}
